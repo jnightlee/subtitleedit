@@ -9,6 +9,7 @@ namespace Nikse.SubtitleEdit.Logic.Ocr.Tesseract
 {
     public class TesseractRunner
     {
+        private static readonly object ProcessLock = new object();
         private readonly bool _runningOnWindows;
 
         public string LastError { get; private set; }
@@ -30,9 +31,52 @@ namespace Nikse.SubtitleEdit.Logic.Ocr.Tesseract
 
         public string Run(string languageCode, string psmMode, string engineMode, string imageFileName, bool run302)
         {
+            var tempTextFileName = Path.GetTempPath() + Guid.NewGuid();
+            var result = default(string);
+
+            if (_runningOnWindows)
+            {
+                result = Run(tempTextFileName, languageCode, psmMode, engineMode, imageFileName, run302);
+            }
+            else
+            {
+                lock (ProcessLock)
+                {
+                    result = Run(tempTextFileName, languageCode, psmMode, engineMode, imageFileName, run302);
+                }
+            }
+
+            if (result == null)
+            {
+                var outputFileName = tempTextFileName + ".html";
+                if (!File.Exists(outputFileName))
+                {
+                    outputFileName = tempTextFileName + ".hocr";
+                }
+
+                result = string.Empty;
+                try
+                {
+                    if (File.Exists(outputFileName))
+                    {
+                        result = ParseHocr(File.ReadAllText(outputFileName, Encoding.UTF8));
+                        File.Delete(outputFileName);
+                    }
+                    File.Delete(imageFileName);
+                }
+                catch
+                {
+                    // ignored
+                }
+            }
+
+            return result;
+        }
+
+        private string Run(string tempTextFileName, string languageCode, string psmMode, string engineMode, string imageFileName, bool run302)
+        {
             LastError = null;
 
-            var tempTextFileName = Path.GetTempPath() + Guid.NewGuid();
             using (var process = new Process())
             {
                 process.StartInfo.Arguments = $@"""{imageFileName}"" ""{tempTextFileName}"" -l {languageCode}";
@@ -97,28 +141,7 @@ namespace Nikse.SubtitleEdit.Logic.Ocr.Tesseract
                 }
             }
 
-            var outputFileName = tempTextFileName + ".html";
-            if (!File.Exists(outputFileName))
-            {
-                outputFileName = tempTextFileName + ".hocr";
-            }
-
-            var result = string.Empty;
-            try
-            {
-                if (File.Exists(outputFileName))
-                {
-                    result = ParseHocr(File.ReadAllText(outputFileName, Encoding.UTF8));
-                    File.Delete(outputFileName);
-                }
-                File.Delete(imageFileName);
-            }
-            catch
-            {
-                // ignored
-            }
-
-            return result;
+            return null;
         }
 
         private static string ParseHocr(string html)
